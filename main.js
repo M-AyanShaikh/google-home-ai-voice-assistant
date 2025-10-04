@@ -1,70 +1,38 @@
-import express from "express";
-import fetch from "node-fetch";
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
 
-const app = express();
-app.use(express.json());
-
-// === CONFIGURATION ===
-const HF_TOKEN = "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"; // Replace with your token
-const MODEL = "HuggingFaceH4/zephyr-7b-beta";
-
-// === ROOT ENDPOINT ===
-app.get("/", (req, res) => {
-  res.send("Google Home AI Voice Assistant Webhook is running ✅");
-});
-
-// === MAIN CHAT ENDPOINT ===
-app.post("/chat", async (req, res) => {
   try {
-    // Dialogflow sends user message in req.body.queryResult.queryText
-    const userMessage = req.body?.queryResult?.queryText || "Hello";
+    const userMessage = req.body.queryResult?.queryText || "Hello";
 
-    console.log("User:", userMessage);
-
-    // === Call Hugging Face Inference API ===
-    const response = await fetch(
-      `https://api-inference.huggingface.co/models/${MODEL}`,
+    const hfResponse = await fetch(
+      "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta",
       {
         method: "POST",
         headers: {
+          Authorization: "Bearer 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", // replace with your HF key
           "Content-Type": "application/json",
-          Authorization: `Bearer ${HF_TOKEN}`,
         },
-        body: JSON.stringify({
-          inputs: userMessage,
-          parameters: { max_new_tokens: 200 },
-        }),
+        body: JSON.stringify({ inputs: userMessage }),
       }
     );
 
-    if (!response.ok) {
-      console.error("Hugging Face API error:", response.statusText);
-      throw new Error("Model request failed");
+    if (!hfResponse.ok) {
+      const errText = await hfResponse.text();
+      console.error("Hugging Face error:", errText);
+      return res.status(500).json({ fulfillmentText: "Model request failed." });
     }
 
-    const data = await response.json();
-    console.log("Model raw response:", JSON.stringify(data));
+    const data = await hfResponse.json();
+    const reply =
+      Array.isArray(data) && data[0]?.generated_text
+        ? data[0].generated_text
+        : "Sorry, I didn’t understand that.";
 
-    // Hugging Face returns array of outputs
-    const modelReply =
-      data[0]?.generated_text?.trim() ||
-      data.generated_text?.trim() ||
-      "Sorry, I couldn’t generate a response.";
-
-    console.log("Assistant:", modelReply);
-
-    // === Dialogflow-compatible response ===
-    res.json({
-      fulfillmentText: modelReply,
-    });
-  } catch (error) {
-    console.error("Error:", error);
-    res.json({
-      fulfillmentText:
-        "I’m sorry, I ran into a problem while thinking about that.",
-    });
+    return res.status(200).json({ fulfillmentText: reply });
+  } catch (err) {
+    console.error("Server error:", err);
+    return res.status(500).json({ fulfillmentText: "Internal server error." });
   }
-});
-
-// === EXPORT FOR VERCEL ===
-export default app;
+}
